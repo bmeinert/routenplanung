@@ -11,7 +11,7 @@ from scipy.optimize import Bounds, LinearConstraint, milp
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
-def lade_daten(radius_m):
+def lade_daten(radius_m, ortsteile_namen=None, ortsteile_datei=None):
     eingabe_seg = DATA_DIR / "abdeckung_segmente.gpkg"
     eingabe_paare = DATA_DIR / f"abdeckung_R{radius_m}.csv"
     eingabe_ort = DATA_DIR / "daten_ort.gpkg"
@@ -19,6 +19,23 @@ def lade_daten(radius_m):
     segmente = gpd.read_file(eingabe_seg, layer="segmente")
     gebaeude = gpd.read_file(eingabe_seg, layer="gebaeude")
     paare = pd.read_csv(eingabe_paare)
+    
+    # Filterung auf Basis der Auswahl aus Schritt 1b einbeziehen
+    if ortsteile_namen and ortsteile_datei:
+        datei_pfad = DATA_DIR / ortsteile_datei
+        if datei_pfad.exists():
+            g_teile = gpd.read_file(datei_pfad, layer="ortsteile")
+            g_auswahl = g_teile[g_teile["name"].isin(ortsteile_namen)]
+            if not g_auswahl.empty:
+                union_geom = g_auswahl.geometry.union_all()
+                zentroids = gebaeude.geometry.centroid
+                mask = zentroids.within(union_geom)
+                gebaeude = gebaeude[mask].copy()
+                
+                # Paare ebenfalls auf die gefilterten Gebäude einschränken
+                gueltige_geb_ids = set(gebaeude["geb_id"])
+                paare = paare[paare["geb_id"].isin(gueltige_geb_ids)].reset_index(drop=True)
+
     try:
         grenze = gpd.read_file(eingabe_ort, layer="ortsgrenze")
     except Exception:
@@ -122,8 +139,12 @@ def erstelle_auswahl_karte(segmente, gebaeude, gewaehlt_mask, abgedeckt_ids, gre
     ax.set_axis_off()
     return fig
 
-def fuehre_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99, zeitlimit_s=120):
-    segmente, gebaeude, paare, grenze = lade_daten(radius_m)
+def führe_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99, zeitlimit_s=120, ortsteile_namen=None, ortsteile_datei=None):
+    segmente, gebaeude, paare, grenze = lade_daten(radius_m, ortsteile_namen, ortsteile_datei)
+    
+    if len(gebaeude[gebaeude["relevant"]]) == 0:
+        raise ValueError("Keine relevanten Gebäude im gewählten Einsatzgebiet gefunden.")
+
     w = gewichte_bestimmen(gebaeude, gewicht_cap_quantil)
     relevant_ids = gebaeude.loc[gebaeude["relevant"], "geb_id"]
     w_gesamt = float(w.reindex(relevant_ids).sum())
