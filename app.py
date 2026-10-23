@@ -10,6 +10,7 @@ from daten_karte import lade_und_verarbeite_kartendaten
 from ortsteile import verarbeite_ortsteile, verarbeite_schadensgebiet
 from abdeckung import fuehre_abdeckung_aus
 from auswahl import fuehre_auswahl_aus
+from routen import fuehre_routenplanung_aus
 
 st.set_page_config(page_title="Katastrophenschutz Routing", layout="wide")
 
@@ -18,7 +19,8 @@ schritt = st.sidebar.radio("Wähle einen Schritt:", [
     "1. Kartendaten & OSM", 
     "2. Einsatzgebiet festlegen", 
     "3. Lautsprecher-Abdeckung",
-    "4. Segment-Auswahl (Optimierung)"
+    "4. Segment-Auswahl (Optimierung)",
+    "5. Tourenplanung (Routen)"
 ])
 
 if schritt == "1. Kartendaten & OSM":
@@ -189,6 +191,39 @@ elif schritt == "4. Segment-Auswahl (Optimierung)":
                 
                 st.pyplot(fig)
                 st.info(f"Gespeicherte GeoPackage-Datei: `{out_gpkg}`")
+                
+            except Exception as e:
+                st.error(f"Ein Fehler ist aufgetreten: {e}")
+
+
+elif schritt == "5. Tourenplanung (Routen)":
+    st.title("🚨 Katastrophenschutz Routing-Tool")
+    st.subheader("Schritt 4: Tourenplanung für die Lautsprecherwagen")
+
+    st.sidebar.header("Parameter Touren")
+    fenster_input = st.sidebar.slider("Zeitfenster je Tour (Minuten)", min_value=30, max_value=240, value=90, step=15)
+    tempo_input = st.sidebar.number_input("Durchsagetempo (km/h)", min_value=5.0, max_value=30.0, value=15.0, step=2.5)
+    durchsage_verb = st.sidebar.checkbox("Durchsage auch auf Verbindungsfahrten", value=False)
+    zeitlimit_r = st.sidebar.slider("Opt. Zeitlimit (Sekunden)", min_value=30, max_value=300, value=60, step=30)
+
+    if st.button("Touren berechnen", type="primary"):
+        with st.spinner("Berechne optimale Fahrzeugtouren und Tempoprofile..."):
+            try:
+                summary, fig, routen_gpkg = fuehre_routenplanung_aus(
+                    fenster_min=int(fenster_input),
+                    tempo_kmh=float(tempo_input),
+                    durchsage_auf_verbindung=durchsage_verb,
+                    zeitlimit_s=int(zeitlimit_r)
+                )
+                st.success("Touren erfolgreich geplant!")
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Benötigte Fahrzeuge", summary["fahrzeuge"])
+                col2.metric("Gesamtfahrstrecke", f"{summary['gesamt_laenge_km']:.1f} km")
+                col3.metric("Davon Durchsagestrecke", f"{summary['durchsage_laenge_km']:.1f} km")
+                
+                st.pyplot(fig)
+                st.info(f"Gespeicherte GeoPackage-Datei: `{routen_gpkg}`")
                 
             except Exception as e:
                 st.error(f"Ein Fehler ist aufgetreten: {e}")
