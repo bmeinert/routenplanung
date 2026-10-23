@@ -146,17 +146,37 @@ elif schritt == "4. Segment-Auswahl (Optimierung)":
     ziel_abdeckung = st.sidebar.slider("Zielabdeckung des Gewichts", min_value=0.5, max_value=1.0, value=0.95, step=0.01)
     zeitlimit_input = st.sidebar.slider("Opt. Zeitlimit (Sekunden)", min_value=10, max_value=300, value=60, step=10)
 
+    # Prüfen, ob Daten aus Schritt 1b vorliegen (Ortsteile oder Schadensgebiet)
+    ortsteile_datei = None
+    verfuegbare_ortsteile = []
+    
+    if (Path("data/schadensgebiet.gpkg").exists()):
+        ortsteile_datei = "schadensgebiet.gpkg"
+        verfuegbare_ortsteile = ["Schadensgebiet"]
+        st.info("📌 Verwende definiertes Schadensgebiet aus Schritt 1b.")
+    elif (Path("data/ortsteile.gpkg").exists()):
+        ortsteile_datei = "ortsteile.gpkg"
+        try:
+            df_ortsteile = gpd.read_file(Path("data/ortsteile.gpkg"), layer="ortsteile")
+            verfuegbare_ortsteile = df_ortsteile["name"].tolist()
+        except Exception:
+            pass
+        st.info("📌 Verwende Ortsteile aus Schritt 1b.")
+
+    gewaehlte_ortsteile = st.multiselect("Einsatzgebiet einschränken (aus Schritt 1b)", options=verfuegbare_ortsteile, default=verfuegbare_ortsteile)
+
     if st.button("Optimierung starten", type="primary"):
-        with st.spinner("Löse Optimierungsmodell (MILP / Greedy)... Das kann einen Moment dauern."):
+        with st.spinner("Löse Optimierungsmodell (MILP / Greedy) für das gewählte Gebiet..."):
             try:
-                bericht, fig, out_gpkg = fuehre_auswahl_aus(
+                bericht, fig, out_gpkg = führe_auswahl_aus(
                     radius_m=int(radius_wahl), 
                     zielabdeckung=ziel_abdeckung, 
-                    zeitlimit_s=int(zeitlimit_input)
+                    zeitlimit_s=int(zeitlimit_input),
+                    ortsteile_namen=gewaehlte_ortsteile if gewaehlte_ortsteile else None,
+                    ortsteile_datei=ortsteile_datei
                 )
                 st.success("Segment-Auswahl erfolgreich optimiert!")
                 
-                # Metriken anzeigen
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Verwendete Methode", bericht["quelle"])
                 col2.metric("Gewählte Segmente", bericht["segmente"])
@@ -164,12 +184,11 @@ elif schritt == "4. Segment-Auswahl (Optimierung)":
                 col4.metric("Netz-Anteil", f"{bericht['anteil_netz']:.0%}")
                 
                 col5, col6 = st.columns(2)
-                col5.metric("Erreichte Zielabdeckung (Gewicht)", f"{bericht['anteil_erreichbar_gew']:.1%}")
-                col6.metric("Vergleich zu Greedy (Ersparnis)", f"{bericht['ersparnis']:.1%}")
+                col5.metric("Erreichte Zielabdeckung", f"{bericht['anteil_erreichbar_gew']:.1%}")
+                col6.metric("Vergleich zu Greedy", f"{bericht['ersparnis']:.1%}")
                 
-                # Karte anzeigen
                 st.pyplot(fig)
-                st.info(f"Gespeicherte GeoPackage-Datei im `data/`-Ordner: `{out_gpkg}`")
+                st.info(f"Gespeicherte GeoPackage-Datei: `{out_gpkg}`")
                 
             except Exception as e:
                 st.error(f"Ein Fehler ist aufgetreten: {e}")
