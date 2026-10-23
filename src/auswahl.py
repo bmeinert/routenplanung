@@ -139,7 +139,7 @@ def erstelle_auswahl_karte(segmente, gebaeude, gewaehlt_mask, abgedeckt_ids, gre
     ax.set_axis_off()
     return fig
 
-def führe_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99, zeitlimit_s=120, ortsteile_namen=None, ortsteile_datei=None):
+def fuehre_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99, zeitlimit_s=120, ortsteile_namen=None, ortsteile_datei=None):
     segmente, gebaeude, paare, grenze = lade_daten(radius_m, ortsteile_namen, ortsteile_datei)
     
     if len(gebaeude[gebaeude["relevant"]]) == 0:

@@ -168,7 +168,7 @@ elif schritt == "4. Segment-Auswahl (Optimierung)":
     if st.button("Optimierung starten", type="primary"):
         with st.spinner("Löse Optimierungsmodell (MILP / Greedy) für das gewählte Gebiet..."):
             try:
-                bericht, fig, out_gpkg = führe_auswahl_aus(
+                bericht, fig, out_gpkg = fuehre_auswahl_aus(
                     radius_m=int(radius_wahl), 
                     zielabdeckung=ziel_abdeckung, 
                     zeitlimit_s=int(zeitlimit_input),
