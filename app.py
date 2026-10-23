@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from daten_karte import lade_und_verarbeite_kartendaten
 from ortsteile import verarbeite_ortsteile, verarbeite_schadensgebiet
 from abdeckung import fuehre_abdeckung_aus
+from auswahl import fuehre_auswahl_aus
 
 st.set_page_config(page_title="Katastrophenschutz Routing", layout="wide")
 
@@ -16,7 +17,8 @@ st.sidebar.title("Navigation")
 schritt = st.sidebar.radio("Wähle einen Schritt:", [
     "1. Kartendaten & OSM", 
     "2. Einsatzgebiet festlegen", 
-    "3. Lautsprecher-Abdeckung"
+    "3. Lautsprecher-Abdeckung",
+    "4. Segment-Auswahl (Optimierung)"
 ])
 
 if schritt == "1. Kartendaten & OSM":
@@ -130,6 +132,44 @@ elif schritt == "3. Lautsprecher-Abdeckung":
                 st.markdown(f"### 🗺️ Unterversorgte Gebäude bei {genutzter_radius} m Radius")
                 st.pyplot(fig)
                 st.info("Gespeicherte Dateien im `data/`-Ordner: `abdeckung_segmente.gpkg`, `segment_kanten.csv`, `abdeckung_R*.csv`")
+                
+            except Exception as e:
+                st.error(f"Ein Fehler ist aufgetreten: {e}")
+
+
+elif schritt == "4. Segment-Auswahl (Optimierung)":
+    st.title("🚨 Katastrophenschutz Routing-Tool")
+    st.subheader("Schritt 3: Gewichtetes Set Cover (Optimale Segment-Auswahl)")
+
+    st.sidebar.header("Parameter Optimierung")
+    radius_wahl = st.sidebar.number_input("Verwendeter Hörradius (m)", min_value=10, max_value=500, value=80, step=10)
+    ziel_abdeckung = st.sidebar.slider("Zielabdeckung des Gewichts", min_value=0.5, max_value=1.0, value=0.95, step=0.01)
+    zeitlimit_input = st.sidebar.slider("Opt. Zeitlimit (Sekunden)", min_value=10, max_value=300, value=60, step=10)
+
+    if st.button("Optimierung starten", type="primary"):
+        with st.spinner("Löse Optimierungsmodell (MILP / Greedy)... Das kann einen Moment dauern."):
+            try:
+                bericht, fig, out_gpkg = fuehre_auswahl_aus(
+                    radius_m=int(radius_wahl), 
+                    zielabdeckung=ziel_abdeckung, 
+                    zeitlimit_s=int(zeitlimit_input)
+                )
+                st.success("Segment-Auswahl erfolgreich optimiert!")
+                
+                # Metriken anzeigen
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Verwendete Methode", bericht["quelle"])
+                col2.metric("Gewählte Segmente", bericht["segmente"])
+                col3.metric("Benötigte Länge", f"{bericht['laenge_km']:.1f} km")
+                col4.metric("Netz-Anteil", f"{bericht['anteil_netz']:.0%}")
+                
+                col5, col6 = st.columns(2)
+                col5.metric("Erreichte Zielabdeckung (Gewicht)", f"{bericht['anteil_erreichbar_gew']:.1%}")
+                col6.metric("Vergleich zu Greedy (Ersparnis)", f"{bericht['ersparnis']:.1%}")
+                
+                # Karte anzeigen
+                st.pyplot(fig)
+                st.info(f"Gespeicherte GeoPackage-Datei im `data/`-Ordner: `{out_gpkg}`")
                 
             except Exception as e:
                 st.error(f"Ein Fehler ist aufgetreten: {e}")
