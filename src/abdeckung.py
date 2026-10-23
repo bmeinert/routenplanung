@@ -105,7 +105,7 @@ def erstelle_abdeckungs_karte(radius, segmente, gebaeude, erreicht, grenze):
     ax.set_axis_off()
     return fig
 
-def führe_abdeckung_aus(radien_m_str="50,80,100,150", haupt_radius=80):
+def fuehre_abdeckung_aus(radien_m_str="50,80,100,150", haupt_radius=80):
     radien = [int(x.strip()) for x in radien_m_str.split(",") if x.strip()]
     if haupt_radius not in radien:
         haupt_radius = radien[0]

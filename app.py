@@ -1,17 +1,23 @@
-
+# app.py
 import streamlit as st
 import sys
 from pathlib import Path
+import pandas as pd
 
 sys.path.append(str(Path(__file__).parent / "src"))
 
 from daten_karte import lade_und_verarbeite_kartendaten
 from ortsteile import verarbeite_ortsteile, verarbeite_schadensgebiet
+from abdeckung import fuehre_abdeckung_aus
 
 st.set_page_config(page_title="Katastrophenschutz Routing", layout="wide")
 
 st.sidebar.title("Navigation")
-schritt = st.sidebar.radio("Wähle einen Schritt:", ["1. Kartendaten & OSM", "2. Einsatzgebiet festlegen"])
+schritt = st.sidebar.radio("Wähle einen Schritt:", [
+    "1. Kartendaten & OSM", 
+    "2. Einsatzgebiet festlegen", 
+    "3. Lautsprecher-Abdeckung"
+])
 
 if schritt == "1. Kartendaten & OSM":
     st.title("🚨 Katastrophenschutz Routing-Tool")
@@ -91,3 +97,39 @@ elif schritt == "2. Einsatzgebiet festlegen":
                     st.info(f"Gespeicherte GeoPackage-Datei: `{out_gpkg}`")
                 except Exception as e:
                     st.error(f"Ein Fehler ist aufgetreten: {e}")
+
+
+elif schritt == "3. Lautsprecher-Abdeckung":
+    st.title("🚨 Katastrophenschutz Routing-Tool")
+    st.subheader("Schritt 2: Abdeckungsmodell für Lautsprecherwagen")
+
+    st.sidebar.header("Parameter Abdeckung")
+    radien_input = st.sidebar.text_input("Hörweiten in m (kommagetrennt)", value="50,80,100,150")
+    haupt_radius_input = st.sidebar.number_input("Haupt-Radius für Karte (m)", min_value=10, max_value=500, value=80, step=10)
+
+    if st.button("Abdeckung berechnen & analysieren", type="primary"):
+        with st.spinner("Berechne Straßensegmente und Puffer-Abdeckungen..."):
+            try:
+                ergebnisse, fig, genutzter_radius = fuehre_abdeckung_aus(radien_input, int(haupt_radius_input))
+                st.success("Abdeckungsanalyse erfolgreich abgeschlossen!")
+                
+                # Sensitivitätsanalyse als Tabelle anzeigen
+                st.markdown("### 📊 Sensitivitätsanalyse nach Hörweiten")
+                df_res = pd.DataFrame(ergebnisse)
+                df_res["anteil_zahl"] = df_res["anteil_zahl"].apply(lambda x: f"{x:.1%}")
+                df_res["anteil_gew"] = df_res["anteil_gew"].apply(lambda x: f"{x:.1%}")
+                st.dataframe(df_res.rename(columns={
+                    "radius": "Radius (m)",
+                    "anteil_zahl": "Erreichbar (Anzahl)",
+                    "anteil_gew": "Erreichbar (Gewichtet)",
+                    "nicht_erreicht": "Nicht erreichbar",
+                    "segs_mit_geb": "Segmente m. Gebäude",
+                    "gesamt_segs": "Gesamt-Segmente"
+                }))
+                
+                st.markdown(f"### 🗺️ Unterversorgte Gebäude bei {genutzter_radius} m Radius")
+                st.pyplot(fig)
+                st.info("Gespeicherte Dateien im `data/`-Ordner: `abdeckung_segmente.gpkg`, `segment_kanten.csv`, `abdeckung_R*.csv`")
+                
+            except Exception as e:
+                st.error(f"Ein Fehler ist aufgetreten: {e}")
