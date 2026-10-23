@@ -122,7 +122,7 @@ def erstelle_auswahl_karte(segmente, gebaeude, gewaehlt_mask, abgedeckt_ids, gre
     ax.set_axis_off()
     return fig
 
-def führe_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99, zeitlimit_s=120):
+def fuehre_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99, zeitlimit_s=120):
     segmente, gebaeude, paare, grenze = lade_daten(radius_m)
     w = gewichte_bestimmen(gebaeude, gewicht_cap_quantil)
     relevant_ids = gebaeude.loc[gebaeude["relevant"], "geb_id"]
