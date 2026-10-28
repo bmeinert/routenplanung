@@ -13,6 +13,7 @@ DATA_DIR = BASE_DIR / "data"
 
 PLACE_ARTEN = ["suburb", "quarter", "neighbourhood", "village", "hamlet", "locality"]
 SCHADENSGEBIET_NAME = "Schadensgebiet"
+EINSATZGEBIET_DATEI = "einsatzgebiet.gpkg"
 
 def osm_aufbereiten(f, stufen, art):
     """Wählt aus OSM-Features die Ortsteil-Polygone aus."""
@@ -114,9 +115,10 @@ def verarbeite_ortsteile(stufen_str="9,10"):
     tabelle, ausserhalb, gesamt_n = bewerte(gebiete, gebaeude)
     
     csv_pfad = DATA_DIR / "ortsteile_liste.csv"
-    out_gpkg = DATA_DIR / "ortsteile.gpkg"
+    gebiete["modus"] = "Ortsteile"
+    out_gpkg = _schreibe_einsatzgebiet(gebiete)
     tabelle.to_csv(csv_pfad, index=False)
-    gebiete.to_file(out_gpkg, layer="ortsteile", driver="GPKG")
+    #gebiete.to_file(out_gpkg, layer="ortsteile", driver="GPKG")
     
     fig = erstelle_ortsteile_karte(gebiete, gebaeude, grenze)
     return tabelle, ausserhalb, gesamt_n, fig, str(out_gpkg)
@@ -162,8 +164,7 @@ def verarbeite_schadensgebiet(schadensort_str: str, radius_m: float):
     gebaeude = lade_gebaeude()
     tabelle, _, gesamt_n = bewerte(gdf, gebaeude)
     
-    out_gpkg = DATA_DIR / "schadensgebiet.gpkg"
-    gdf.to_file(out_gpkg, layer="ortsteile", driver="GPKG")
+    out_gpkg = _schreibe_einsatzgebiet(gdf)
     tabelle.to_csv(DATA_DIR / "ortsteile_liste.csv", index=False)
     
     # Karte für Schadensgebiet rendern[cite: 3]
@@ -181,3 +182,33 @@ def verarbeite_schadensgebiet(schadensort_str: str, radius_m: float):
     ax.set_axis_off()
     
     return tabelle, info, gesamt_n, fig, str(out_gpkg)
+
+def _schreibe_einsatzgebiet(gdf):
+    pfad = DATA_DIR / EINSATZGEBIET_DATEI
+    pfad.unlink(missing_ok=True)
+    gdf.to_file(pfad, layer="ortsteile", driver="GPKG")
+    return pfad
+
+def setze_gesamten_ort():
+    gpkg_pfad = DATA_DIR / "daten_ort.gpkg"
+    if not gpkg_pfad.exists():
+        raise FileNotFoundError("Keine Kartendatei (`daten_ort.gpkg`) gefunden. Bitte zuerst Schritt 1 ausführen.")
+
+    grenze = gpd.read_file(gpkg_pfad, layer="ortsgrenze")
+    df = grenze.copy()
+    df["name"] = "Gesamter Ort"
+    df["quelle"] = "ortsgrenze"
+    df["modus"] = "Gesamter Ort"
+    df = df[["name", "quelle", "modus", "geometry"]]
+    pfad = _schreibe_einsatzgebiet(df)
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    for layer, farbe, lw in (("gebaeude", "lightgrey", 0), ("strassen", "steelblue", 0.6)):
+        try:
+            gpd.read_file(gpkg_pfad, layer=layer).plot(ax=ax, color=farbe, linewidth=lw)
+        except Exception:
+            pass
+    df.boundary.plot(ax=ax, color="red", linewidth=1.5)
+    ax.set_title("Einsatzgebiet: Gesamter Ort")
+    ax.set_axis_off()
+    return df, fig, str(pfad)

@@ -14,6 +14,9 @@ import scipy.sparse as sp
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from scipy.sparse.csgraph import connected_components, dijkstra
 from shapely.geometry import Point
+import plotly.graph_objects as go
+import plotly.colors as pc
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -255,9 +258,9 @@ def loese_vrp(mat, gruppen, k, fenster_s, zeitlimit):
     fehlend = [i for i, g in enumerate(gruppen) if not (set(g) & besucht)]
     return routen, fehlend
 
-def suche_fahrzeuge(mat, gruppen, serv_min, fenster_s, zeitlimit):
+def suche_fahrzeuge(mat, gruppen, serv_min, fenster_s, zeitlimit, max_fahrzeuge=20):
     k = max(1, math.ceil(serv_min / fenster_s))
-    while k <= MAX_FAHRZEUGE:
+    while k <= max_fahrzeuge:
         routen, fehlend = loese_vrp(mat, gruppen, k, fenster_s, zeitlimit)
         if routen is not None and not fehlend:
             return k, routen
@@ -313,25 +316,77 @@ def teilstuecke(netz, req, serv, pi, routen, reg_frei, reg_conn, sende_zwischen,
             leg(pfad(pi["W_frei"], aktuell, depot), reg_frei, "rueckfahrt", False)
     return gpd.GeoDataFrame(zeilen, geometry="geometry", crs=netz["crs"])
 
-def erstelle_routen_karte(netz, teil, anzahl):
-    fig, ax = plt.subplots(figsize=(10, 10))
-    netz["strassen"][netz["strassen"]["im_netz"]].plot(ax=ax, color="#dddddd", linewidth=0.4)
-    farben = plt.cm.tab10(np.linspace(0, 1, 10))
+def _linien(gdf, farbe, breite, name, gruppe, zeigen=True):
+    """Alle Linien eines GeoDataFrames als EINE Plotly-Spur (schnell)."""
+    g = gdf.to_crs(4326)
+    lon, lat = [], []
+    for geom in g.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        teile = geom.geoms if geom.geom_type == "MultiLineString" else [geom]
+        for t in teile:
+            x, y = t.xy
+            lon += list(x) + [None]
+            lat += list(y) + [None]
+    return go.Scattermap(lon=lon, lat=lat, mode="lines",
+                         line=dict(color=farbe, width=breite),
+                         name=name, legendgroup=gruppe, showlegend=zeigen,
+                         hoverinfo="name")
+
+def rahmen_zeilen(p, k=None):
+    """Rahmendaten als Textzeilen (für Karte UND Anzeige)."""
+    zeilen = [
+        f"Zeitfenster je Tour: {p['fenster_min']} min",
+        f"Durchsagetempo: {p['tempo_kmh']:g} km/h",
+        f"Durchsage auf Verbindungsfahrten: {'Ja' if p['durchsage_auf_verbindung'] else 'Nein'}",
+        f"Opt. Zeitlimit: {p['zeitlimit_s']} s",
+        f"Max. Fahrzeuge: {p['max_fahrzeuge']}",
+    ]
+    if k is not None:
+        zeilen.append(f"Eingesetzte Fahrzeuge: {k}")
+    return zeilen
+
+def erstelle_routen_karte(netz, teil, anzahl, params):
+    fig = go.Figure()
+    fig.add_trace(_linien(netz["strassen"][netz["strassen"]["im_netz"]],
+                          "#cccccc", 1, "Straßennetz", "netz"))
+    farben = pc.qualitative.D3
     for fz in sorted(teil["fahrzeug"].unique()):
         t = teil[teil["fahrzeug"] == fz]
-        c = farben[(fz - 1) % 10]
-        still, laut = t[~t["sendet"]], t[t["sendet"]]
-        if len(still):
-            still.plot(ax=ax, color=c, linewidth=0.8, linestyle=":")
-        if len(laut):
-            laut.plot(ax=ax, color=c, linewidth=2.4)
-    ax.plot(*netz["depot_xy"], marker="*", color="black", markersize=16)
-    ax.set_title(f"{anzahl} Fahrzeuge: Tourenplanung Lautsprecherwagen")
-    ax.set_axis_off()
+        c = farben[(fz - 1) % len(farben)]
+        g = f"fz{fz}"
+        fig.add_trace(_linien(t[~t["sendet"]], c, 2, f"Fz {fz} – Verbindung", g))
+        fig.add_trace(_linien(t[t["sendet"]],  c, 5, f"Fz {fz} – Durchsage", g))
+
+    depot = gpd.GeoSeries([Point(netz["depot_xy"])], crs=netz["crs"]).to_crs(4326).iloc[0]
+    fig.add_trace(go.Scattermap(lon=[depot.x], lat=[depot.y], mode="markers",
+                                marker=dict(size=16, color="black"), name="Depot"))
+
+    fig.add_annotation(xref="paper", yref="paper", x=0.01, y=0.99,
+                       xanchor="left", yanchor="top", showarrow=False, align="left",
+                       text="<br>".join(rahmen_zeilen(params, anzahl)),
+                       bgcolor="rgba(255,255,255,0.85)", bordercolor="#888", borderwidth=1)
+    fig.update_layout(
+        map=dict(style="open-street-map", center=dict(lon=depot.x, lat=depot.y), zoom=12),
+        margin=dict(l=0, r=0, t=0, b=0), height=700,
+        legend=dict(x=0.99, xanchor="right", y=0.99, yanchor="top",
+                    bgcolor="rgba(255,255,255,0.85)"))
     return fig
 
-def fuehre_routenplanung_aus(fenster_min=90, tempo_kmh=15.0, durchsage_auf_verbindung=False, tempofaktor=0.8, vmax=80.0, knotenstrafe_s=3.0, zeitlimit_s=60):
-    netz = netz_laden(DEPOT_LAT, DEPOT_LON)
+def fuehre_routenplanung_aus(
+    fenster_min=90, 
+    tempo_kmh=15.0, 
+    durchsage_auf_verbindung=False, 
+    tempofaktor=0.8, 
+    vmax=80.0, 
+    knotenstrafe_s=3.0, 
+    zeitlimit_s=60, 
+    max_fahrzeuge=5,
+    depot_lat=DEPOT_LAT,
+    depot_lon=DEPOT_LON
+):
+    # Übergebene Koordinaten für das Depot nutzen
+    netz = netz_laden(depot_lat, depot_lon)
     s = netz["strassen"]
     gebaeude = gebaeude_fuer_ortslage()
     
@@ -354,26 +409,51 @@ def fuehre_routenplanung_aus(fenster_min=90, tempo_kmh=15.0, durchsage_auf_verbi
 
     serv_min = sum(min(serv[k - 1] for k in g) for g in gruppen)
 
-    k, routen = suche_fahrzeuge(mat, gruppen, serv_min, fenster_s, zeitlimit_s)
+    k, routen = suche_fahrzeuge(mat, gruppen, serv_min, fenster_s, zeitlimit_s, max_fahrzeuge=max_fahrzeuge)
     if routen is None:
-        raise ValueError("Keine zulässige Routen-Lösung mit den gegebenen Parametern gefunden.")
+        raise ValueError(f"Keine zulässige Routen-Lösung mit maximal {max_fahrzeuge} Fahrzeugen gefunden.")
 
     sk_alle = pd.read_csv(DATA_DIR / "segment_kanten.csv")
     seg_von_kante = dict(zip(sk_alle["kanten_id"], sk_alle["seg_id"]))
     teil = teilstuecke(netz, req, serv, pi, routen, reg_frei, reg_conn, durchsage_auf_verbindung, seg_von_kante)
 
-    # Export
     routen_gpkg = DATA_DIR / "routen.gpkg"
     teil.to_file(routen_gpkg, layer="routen", driver="GPKG")
     gpd.GeoDataFrame({"name": ["Start/Ende"]}, geometry=[Point(netz["depot_xy"])], crs=netz["crs"]).to_file(
         routen_gpkg, layer="depot", driver="GPKG")
+
+    params = dict(fenster_min=fenster_min, tempo_kmh=tempo_kmh,
+                  durchsage_auf_verbindung=durchsage_auf_verbindung,
+                  zeitlimit_s=zeitlimit_s, max_fahrzeuge=max_fahrzeuge,
+                  depot_lat=depot_lat, depot_lon=depot_lon)
     
-    fig = erstelle_routen_karte(netz, teil, k)
+    fig = erstelle_routen_karte(netz, teil, k, params)
     
+    # Kennzahlen je Fahrzeug / Route
+    je_fz = teil.groupby("fahrzeug")
+    touren = []
+    for fz, t in je_fz:
+        dauer_s = float(t["dauer_s"].sum())
+        dauer_durchsage_s = float(t.loc[t["typ"] == "Durchsage", "dauer_s"].sum())
+        touren.append({
+            "fahrzeug": int(fz),
+            "fahrzeit_min": dauer_s / 60,
+            "davon_durchsage_min": dauer_durchsage_s / 60,
+            "davon_verbindung_min": (dauer_s - dauer_durchsage_s) / 60,
+            "strecke_km": float(t["laenge_m"].sum() / 1000),
+            "durchsage_km": float(t.loc[t["typ"] == "Durchsage", "laenge_m"].sum() / 1000),
+            "segmente": int((t["typ"] == "Durchsage").sum()),
+            "auslastung": dauer_s / fenster_s,  # Anteil des Zeitfensters
+        })
+
     summary = {
         "fahrzeuge": k,
         "gesamt_laenge_km": float(teil["laenge_m"].sum() / 1000),
-        "durchsage_laenge_km": float(teil.loc[teil["typ"] == "Durchsage", "laenge_m"].sum() / 1000)
+        "durchsage_laenge_km": float(teil.loc[teil["typ"] == "Durchsage", "laenge_m"].sum() / 1000),
+        "gesamt_fahrzeit_min": sum(x["fahrzeit_min"] for x in touren),
+        "laengste_tour_min": max(x["fahrzeit_min"] for x in touren),
+        "fenster_min": fenster_min,
+        "touren": touren,
     }
     
     return summary, fig, str(routen_gpkg)

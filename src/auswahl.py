@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from scipy.optimize import Bounds, LinearConstraint, milp
+import json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -20,12 +21,23 @@ def lade_daten(radius_m, ortsteile_namen=None, ortsteile_datei=None):
     gebaeude = gpd.read_file(eingabe_seg, layer="gebaeude")
     paare = pd.read_csv(eingabe_paare)
     
-    # Filterung auf Basis der Auswahl aus Schritt 1b einbeziehen
-    if ortsteile_namen and ortsteile_datei:
+    grenze = None
+    
+    # Angepasste Filterung: Greift nun, sobald eine Ortsteile-/Einsatzgebietsdatei vorliegt
+    if ortsteile_datei:
         datei_pfad = DATA_DIR / ortsteile_datei
         if datei_pfad.exists():
-            g_teile = gpd.read_file(datei_pfad, layer="ortsteile")
-            g_auswahl = g_teile[g_teile["name"].isin(ortsteile_namen)]
+            try:
+                g_teile = gpd.read_file(datei_pfad, layer="ortsteile")
+            except Exception:
+                g_teile = gpd.read_file(datei_pfad)
+                
+            # Wenn konkrete Namen übergeben wurden, darauf filtern, ansonsten alle nutzen (z.B. "Gesamter Ort")
+            if ortsteile_namen is not None and "name" in g_teile.columns:
+                g_auswahl = g_teile[g_teile["name"].isin(ortsteile_namen)]
+            else:
+                g_auswahl = g_teile
+                
             if not g_auswahl.empty:
                 union_geom = g_auswahl.geometry.union_all()
                 zentroids = gebaeude.geometry.centroid
@@ -35,11 +47,17 @@ def lade_daten(radius_m, ortsteile_namen=None, ortsteile_datei=None):
                 # Paare ebenfalls auf die gefilterten Gebäude einschränken
                 gueltige_geb_ids = set(gebaeude["geb_id"])
                 paare = paare[paare["geb_id"].isin(gueltige_geb_ids)].reset_index(drop=True)
+                
+                # Exakte Grenze für die Karte auf das gewählte Einsatzgebiet setzen
+                grenze = g_auswahl
 
-    try:
-        grenze = gpd.read_file(eingabe_ort, layer="ortsgrenze")
-    except Exception:
-        grenze = None
+    # Fallback, falls keine Datei gefunden wurde
+    if grenze is None:
+        try:
+            grenze = gpd.read_file(eingabe_ort, layer="ortsgrenze")
+        except Exception:
+            grenze = None
+            
     return segmente, gebaeude, paare, grenze
 
 def gewichte_bestimmen(gebaeude, gewicht_cap_quantil=0.99):
@@ -205,5 +223,20 @@ def fuehre_auswahl_aus(radius_m=80, zielabdeckung=0.95, gewicht_cap_quantil=0.99
         "greedy_segmente": kz_greedy["segmente"],
         "ersparnis": 1 - kz["laenge_km"] / kz_greedy["laenge_km"] if kz_greedy["laenge_km"] > 0 else 0
     }
+
+    gebiet_modus = (
+    str(grenze["modus"].iloc[0])
+    if grenze is not None and "modus" in grenze.columns
+    else "Gesamter Ort"
+    )
+    gebiet_datei = DATA_DIR / ortsteile_datei if ortsteile_datei else None
+    meta = {
+        "modus": gebiet_modus,
+        "namen": list(ortsteile_namen) if ortsteile_namen else [],
+        "radius_m": radius_m,
+        "zielabdeckung": zielabdeckung,
+        "gebiet_mtime": gebiet_datei.stat().st_mtime if gebiet_datei and gebiet_datei.exists() else None,
+    }
+    (DATA_DIR / "auswahl_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     
     return bericht_dict, fig, str(DATA_DIR / "auswahl_segmente.gpkg")
